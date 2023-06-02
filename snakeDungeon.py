@@ -10,155 +10,160 @@ import zipfile
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from stegano import lsb
+from PIL import Image
 
 class Vault:
     """
     Handle zip encryption/decryption.
 
     Attributes:
-        folder_name (string): Name of a folder to zip/unzip.
+        input_file (string): Name of a input_file to zip/unzip.
     """
     
-    def __init__(self, folder_name, cover, password, salt):
+    def __init__(self, input_file):
         """
         Initialize instance.
 
         Args:
-            folder_name (string): Name of a folder to zip/unzip.
-            cover (string): Path to a file with hidden information.
-            password (string): User provided password.
-            salt (string): User provided salt.
+            input_file (string): Name of a input_file to zip/unzip.
         """
-        self.folder_name = folder_name
-        self.cover = cover
-        self.password = password
-        self.salt = salt
+        self.input_file = input_file
+
+    def calculate_file_hash(self, file_path):
+        """
+        Calculate hashsum.
+
+        Args:
+            file_path (string): path to a file.
+        """
+        hash_object = hashlib.sha256()
+        with open(file_path, 'rb') as file:
+            for chunk in iter(lambda: file.read(4096), b''):
+                hash_object.update(chunk)
+                
+        return hash_object.hexdigest()
+
+    def mask(self):
+        """Mask a file."""
+        mask_input = int(getpass.getpass(f'[+] Mask value \033[1m{args.input_file}\033[0m: '))
         
-    def password_processor(self):
-        """ Transform given password into 32 bytes length key encoded by base64."""
-        kdf = PBKDF2HMAC(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=self.salt.encode(),
-            iterations=100000
-        )
-        
-        key = kdf.derive(self.password.encode())
-        return base64.urlsafe_b64encode(key)
-    
-    
-    def do_zip(self):
-        """Zip folder and remove it."""
-        with zipfile.ZipFile(f'{self.folder_name}.zip', 'w') as zip_me:
-            for root, _, files  in os.walk(self.folder_name):
-                for file in files:
-                    file_path = os.path.join(root, file)
-                    zip_me.write(file_path)
-                    
-        shutil.rmtree(self.folder_name)
-        print(f'[+] \033[1m{self.folder_name}\033[0m zipped')    
-    
-    def do_encryption(self):
-        """Encrypt zipped folder and remove zip file."""
-        with open(f'{self.folder_name}.bin', 'wb') as encrypted_file:
-            # Read zip content.
-            with open(f'{self.folder_name}.zip', 'rb') as zip_file:
-                zip_content = zip_file.read()
-    
-            # Encrypt zip content.
-            cipher = Fernet(self.password_processor())
-            encrypted_zip = cipher.encrypt(zip_content)
-            encrypted_file.write(encrypted_zip)
-            
-        os.remove(f'{self.folder_name}.zip')
-        print(f'[+] \033[1m{self.folder_name}\033[0m encrypted')    
-    
-    def do_hide(self):
-        """Hide encrypted file behind image and delete it."""
-        with open(f'{self.folder_name}.bin', 'rb') as encrypted_file:
-            binary_data = encrypted_file.read()
-            encoded_data = base64.b64encode(binary_data).decode()
-    
-        steg_img = lsb.hide(self.cover, encoded_data)
-        steg_img.save(self.cover)
-    
-        os.remove(f'{self.folder_name}.bin')
-        print(f'[+] \033[1m{self.folder_name}\033[0m hidden in \033[1m{self.cover}\033[0m')    
-    
-    def revert_zip(self):
-        """Unzip archive and delete it."""
-        with zipfile.ZipFile(f'{self.folder_name}.zip', 'r') as revert_zipping:
-            revert_zipping.extractall()
-            
-        os.remove(f'{self.folder_name}.zip')
-        print(f'[+] \033[1m{self.folder_name}\033[0m unzipped')    
-    
-    def revert_encryption(self):
-        """Decrypt binary file and delete it."""
-        # Read encrypted file
-        with open(f'{self.folder_name}.bin', 'rb') as encrypted_file:
-            encrypted_data = encrypted_file.read()
-            cipher = Fernet(self.password_processor())
-            decrypted_data = cipher.decrypt(encrypted_data)
-    
-        os.remove(f'{self.folder_name}.bin')
-        
-        # Decrypt and save as zip
-        with open(f'{self.folder_name}.zip', 'wb') as zip_me:
-            zip_me.write(decrypted_data)
+        with open(f'{self.input_file}.bin', 'rb') as file:
+            data = file.read()
 
-        print(f'[+] \033[1m{self.folder_name}\033[0m decrypted')    
-    
-    def revert_hide(self):
-        """Discover hidden binary."""
-        extracted_data = lsb.reveal(self.cover)
-        decoded_data = base64.b64decode(extracted_data.encode())
-    
-        with open(f'{self.folder_name}.bin', "wb") as encrypted_file:
-            encrypted_file.write(decoded_data)
-
-        print(f'[+] \033[1m{self.folder_name}\033[0m dicovered')    
-
-
-if __name__ == '__main__':
-    # Parse arguments.
-    parser = argparse.ArgumentParser(
-                        prog='snakeDungeon - DIY encryption tool',
-                        description='Python script for encryption and steganography automation.',
-                        epilog='v1')
-    
-    parser.add_argument('instruction', help='Choose whether to 1) encrypt or 2) decrypt.')
-    parser.add_argument('folder', help='Folder path to 1) encrypt, 2) hold decrypted files.')
-    parser.add_argument('cover', help='Image path 1) with encrypted data, 2) to write encrypted data.')
-    args = parser.parse_args()
-    
-    # Get password & salt.
-    password = getpass.getpass(f'[+] Encrypt \033[1m{args.folder}\033[0m with password: ')
-    salt = getpass.getpass(f'[+] Salt for \033[1m{args.folder}\033[0m: ')
-
-    # Init job.
-    vault_instance = Vault(args.folder, args.cover, password, salt)
-
-    # Encryption.    
-    if args.instruction == 'encrypt':
-        #Check if target and cover image exists & ask to repeat password.
-        if not os.path.isdir(args.folder) or not os.path.exists(args.folder) or not os.path.exists(args.cover):
-            print(f'\033[31m\033[1m[-] Error\033[0m: entity to encrypt must be an existing folder')
+        if mask_input <= 0 and mask_input >= 255:
+            print(f'\033[31m\033[1m[-] Error\033[0m: wrong mask value.')
             sys.exit(1)
-        else:
+            
+        mask_result = bytes(byte ^ mask_input for byte in data)
+    
+        with open(f'{self.input_file}.bin', 'wb') as file:
+            file.write(mask_result)
+
+        print(f'[+] \033[1m{self.input_file}\033[0m mask processed.')
+        
+    def password_processor(self, mode):
+        """ Transform given password into 32 bytes length key encoded by base64."""
+        # Get password & salt.
+        password = getpass.getpass(f'[+] Encrypt \033[1m{args.input_file}\033[0m with password: ')
+        salt = getpass.getpass(f'[+] Salt for \033[1m{args.input_file}\033[0m: ')
+    
+        if mode == 'encrypt':
             repeat = getpass.getpass('[+] Repeat password: ')
             if password != repeat:
                 print(f'\033[31m\033[1m[-] Error\033[0m: passwords does not match')
                 sys.exit(1)
-                        
+            else:
+                print('[+] Processing.')
+                
+        kdf = PBKDF2HMAC(
+            algorithm=hashes.SHA256(),
+            length=32,
+            salt=salt.encode(),
+            iterations=100000
+        )
+        
+        key = kdf.derive(password.encode())
+        return base64.urlsafe_b64encode(key)
+    
+    
+    def do_zip(self):
+        """Zip input_file and remove it."""
+        with zipfile.ZipFile(f'{self.input_file}.zip', 'w') as zip_me:
+            for root, _, files  in os.walk(self.input_file):
+                for file in files:
+                    file_path = os.path.join(root, file)
+                    zip_me.write(file_path)
+                    
+        shutil.rmtree(self.input_file)
+        print(f'[+] \033[1m{self.input_file}\033[0m zipped')    
+    
+    def do_encryption(self):
+        """Encrypt zipped input_file and remove zip file."""
+        with open(f'{self.input_file}.bin', 'wb') as encrypted_file:
+            # Read zip content.
+            with open(f'{self.input_file}.zip', 'rb') as zip_file:
+                zip_content = zip_file.read()
+    
+            # Encrypt zip content.
+            cipher = Fernet(self.password_processor('encrypt'))
+            encrypted_zip = cipher.encrypt(zip_content)
+            encrypted_file.write(encrypted_zip)
+            
+        os.remove(f'{self.input_file}.zip')
+        
+        print(f'[+] \033[1m{self.input_file}\033[0m encrypted.')   
+    
+    def revert_zip(self):
+        """Unzip archive and delete it."""
+        with zipfile.ZipFile(f'{self.input_file}.zip', 'r') as revert_zipping:
+            revert_zipping.extractall()
+            
+        os.remove(f'{self.input_file}.zip')
+        print(f'[+] \033[1m{self.input_file}\033[0m unzipped')    
+    
+    def revert_encryption(self):
+        """Decrypt binary file and delete it."""
+        # Read encrypted file
+        with open(f'{self.input_file}.bin', 'rb') as encrypted_file:
+            encrypted_data = encrypted_file.read()
+            cipher = Fernet(self.password_processor('decrypt'))
+            decrypted_data = cipher.decrypt(encrypted_data)
+
+        os.remove(f'{self.input_file}.bin')
+        
+        # Decrypt and save as zip
+        with open(f'{self.input_file}.zip', 'wb') as zip_me:
+            zip_me.write(decrypted_data)
+
+        print(f'[+] \033[1m{self.input_file}\033[0m decrypted')    
+
+
+if __name__ == '__main__':
+    # Parse arguments.
+    parser = argparse.ArgumentParser(prog='snakeDungeon')
+    
+    parser.add_argument('instruction')
+    parser.add_argument('input_file')
+    args = parser.parse_args()
+
+    # Init job.
+    vault_instance = Vault(args.input_file)
+
+    # Encryption.    
+    if args.instruction == 'encrypt':
+        #Check if target and cover image exists & ask to repeat password.
+        if not os.path.exists(args.input_file):
+            print(f'\033[31m\033[1m[-] Error\033[0m: entity to encrypt must be an existing input_file')
+            sys.exit(1)
+        else:  
             success = False
 
         # Run encrypt&hide schema.
         try:
             vault_instance.do_zip()
             vault_instance.do_encryption()
-            vault_instance.do_hide()
+            vault_instance.mask()
+            os.rename(f'{args.input_file}.bin', f'{args.input_file}')
             success = True
 
         # Revert change in case of an error.
@@ -166,14 +171,10 @@ if __name__ == '__main__':
             print(f'\033[31m\033[1m[-] Error\033[0m: {e}')
             print('[-] Reverting changes')
 
-            if f'{vault_instance.folder_name}.bin' in os.listdir():
+            if f'{vault_instance.input_file}.bin' in os.listdir():
                 vault_instance.revert_encryption()
                 vault_instance.revert_zip()
-            elif f'{vault_instance.folder_name}.zip' in os.listdir():
-                vault_instance.revert_zip()
-            else:
-                vault_instance.revert_hide()
-                vault_instance.revert_encryption()
+            elif f'{vault_instance.input_file}.zip' in os.listdir():
                 vault_instance.revert_zip()
 
         # Exit status.
@@ -187,16 +188,17 @@ if __name__ == '__main__':
 
     # Decryption.
     elif args.instruction == 'decrypt':
-        # Check if cover image exists.
-        if not os.path.exists(args.cover):
-            print(f'\033[31m\033[1m[-] Error\033[0m: cover image does not exist')
+        # Check if file exists.
+        if not os.path.exists(f'{args.input_file}'):
+            print(f'\033[31m\033[1m[-] Error\033[0m: file does not exist.')
             sys.exit(1)
         else:
             success = False
 
         # Run discover&decrypt schema.
         try:
-            vault_instance.revert_hide()
+            os.rename(f'{args.input_file}', f'{args.input_file}.bin')
+            vault_instance.mask()
             vault_instance.revert_encryption()
             vault_instance.revert_zip()
             success = True
@@ -206,15 +208,11 @@ if __name__ == '__main__':
             print(f'\033[31m\033[1m[-] Error\033[0m: {e}')
             print('[-] Reverting changes')
 
-            if f'{vault_instance.folder_name}.bin' in os.listdir():
+            if f'{vault_instance.input_file}.bin' in os.listdir():
                 vault_instance.do_hide()
-            elif f'{vault_instance.folder_name}.zip' in os.listdir():
+            elif f'{vault_instance.input_file}.zip' in os.listdir():
                 vault_instance.do_encryption()
                 vault_instance.do_hide()
-            else:
-                vault_instance.do_zip()
-                vault_instance.do_encryption()
-                vault_instance.do_hide()   
 
         # Exit status.
         finally:
@@ -224,3 +222,14 @@ if __name__ == '__main__':
             else:
                 print(f'\033[31m\033[1m[-] Fail\033[0m')
                 sys.exit(1)
+
+    # Check hassum.
+    elif args.instruction == 'hash':
+        # Check if file exists.
+        if not os.path.exists(f'{args.input_file}'):
+            print(f'\033[31m\033[1m[-] Error\033[0m: file does not exist.')
+            sys.exit(1)
+        else:
+            hash_sum = vault_instance.calculate_file_hash(f'{args.input_file}')
+            print(f'\033[32m\033[1m[+] Result\033[0m: {hash_sum}')
+            sys.exit(0)
